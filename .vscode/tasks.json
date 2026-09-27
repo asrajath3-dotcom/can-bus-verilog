@@ -1,0 +1,45 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "CAN: Compile Shift Register",
+            "type": "shell",
+            "command": "C:\\iverilog\\bin\\iverilog.exe",
+            "args": [
+                "-o",
+                "shift_sim.out",
+                "rtl/shift_register.v",
+                "tb/shift_register_tb.v"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "CAN: Run Shift Register Simulation",
+            "type": "shell",
+            "command": "C:\\iverilog\\bin\\vvp.exe",
+            "args": [
+                "shift_sim.out"
+            ],
+            "dependsOn": "CAN: Compile Shift Register",
+            "problemMatcher": []
+        },
+        {
+            "label": "CAN: Open Waveform",
+            "type": "process",
+            "command": "C:\\msys64\\ucrt64\\bin\\gtkwave.exe",
+            "args": [
+                "${workspaceFolder}\\shift_register.vcd"
+            ],
+            "dependsOn": "CAN: Run Shift Register Simulation",
+            "problemMatcher": []
+        },
+        {
+            "label": "CAN: Simulate + Waveform",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "CAN: Open Waveform"
+            ],
+            "problemMatcher": []
+        }
+    ]
+}

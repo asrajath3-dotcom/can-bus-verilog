@@ -24,13 +24,37 @@
             "problemMatcher": []
         },
         {
+            "label": "CAN: Compile Bit Timing",
+            "type": "shell",
+            "command": "C:\\iverilog\\bin\\iverilog.exe",
+            "args": [
+                "-o",
+                "bit_timing_sim.out",
+                "rtl/bit_timing.v",
+                "tb/tb/bit_timing_tb.v"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "CAN: Run Bit Timing Simulation",
+            "type": "shell",
+            "command": "C:\\iverilog\\bin\\vvp.exe",
+            "args": [
+                "bit_timing_sim.out"
+            ],
+            "dependsOn": "CAN: Compile Bit Timing",
+            "problemMatcher": []
+        },
+        {
             "label": "CAN: Open Waveform",
             "type": "process",
             "command": "C:\\msys64\\ucrt64\\bin\\gtkwave.exe",
             "args": [
-                "${workspaceFolder}\\shift_register.vcd"
+                "-a",
+                "${workspaceFolder}\\bit_timing.gtkw",
+                "${workspaceFolder}\\bit_timing.vcd"
             ],
-            "dependsOn": "CAN: Run Shift Register Simulation",
+            "dependsOn": "CAN: Run Bit Timing Simulation",
             "problemMatcher": []
         },
         {

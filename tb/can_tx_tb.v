@@ -7,6 +7,8 @@ module can_tx_tb;
 	reg start;
 	reg bit_tick;
 	reg [10:0] can_id;
+	reg [3:0] dlc;
+	reg [63:0] data;
 	wire tx;
 	integer errors;
 	integer i;
@@ -17,10 +19,109 @@ module can_tx_tb;
 		.start(start),
 		.bit_tick(bit_tick),
 		.can_id(can_id),
+		.dlc(dlc),
+		.data(data),
 		.tx(tx)
 	);
 
 	always #5 clk = ~clk;
+
+	task pulse_tick;
+		begin
+			@(negedge clk);
+			bit_tick = 1'b1;
+			@(posedge clk);
+			#1;
+			@(negedge clk);
+			bit_tick = 1'b0;
+		end
+	endtask
+
+	task check_data_case;
+		input [3:0] test_dlc;
+		input [63:0] test_data;
+		input [6:0] expected_bit_count;
+		integer bit_index;
+		reg [10:0] expected_id;
+		begin
+			expected_id = 11'b10100110101;
+			@(negedge clk);
+			reset = 1'b1;
+			start = 1'b0;
+			bit_tick = 1'b0;
+			repeat (2) @(posedge clk);
+			@(negedge clk);
+			reset = 1'b0;
+			can_id = expected_id;
+			dlc = test_dlc;
+			data = test_data;
+			start = 1'b1;
+			@(posedge clk);
+			#1;
+			start = 1'b0;
+			can_id = ~expected_id;
+			dlc = 4'd0;
+			data = ~test_data;
+			if (tx !== 1'b0 || dut.state !== 3'd1) begin
+				$display("ERROR: DLC %0d case failed to enter SOF.", test_dlc);
+				errors = errors + 1;
+			end
+
+			pulse_tick();
+			if (dut.state !== 3'd2) begin
+				$display("ERROR: DLC %0d case failed to enter SEND_ID.", test_dlc);
+				errors = errors + 1;
+			end
+
+			for (bit_index = 0; bit_index < 11; bit_index = bit_index + 1) begin
+				pulse_tick();
+				if (tx !== expected_id[10-bit_index]) begin
+					$display("ERROR: DLC %0d case ID bit %0d was not MSB first.",
+							 test_dlc, bit_index + 1);
+					errors = errors + 1;
+				end
+				if (bit_index == 10 && dut.state !== 3'd3) begin
+					$display("ERROR: DLC %0d case did not enter CONTROL after the ID.",
+							 test_dlc);
+					errors = errors + 1;
+				end
+			end
+
+			pulse_tick();
+			if (expected_bit_count == 0) begin
+				if (dut.state !== 3'd5) begin
+					$display("ERROR: DLC %0d should skip DATA and enter CRC.", test_dlc);
+					errors = errors + 1;
+				end
+			end else if (dut.state !== 3'd4) begin
+				$display("ERROR: DLC %0d should enter DATA.", test_dlc);
+				errors = errors + 1;
+			end
+
+			for (bit_index = 0; bit_index < expected_bit_count; bit_index = bit_index + 1) begin
+				pulse_tick();
+				if (tx !== test_data[63-bit_index]) begin
+					$display("ERROR: DLC %0d data bit %0d expected %b, observed %b.",
+							 test_dlc, bit_index + 1,
+							 test_data[63-bit_index], tx);
+					errors = errors + 1;
+				end
+				if (bit_index == expected_bit_count - 1) begin
+					if (dut.state !== 3'd5) begin
+						$display("ERROR: DLC %0d did not enter CRC after its final data bit.",
+								 test_dlc);
+						errors = errors + 1;
+					end
+				end else if (dut.state !== 3'd4) begin
+					$display("ERROR: DLC %0d left DATA before all bits were sent.", test_dlc);
+					errors = errors + 1;
+				end
+			end
+
+			$display("Checked DLC %0d: expected %0d data bits.",
+					 test_dlc, expected_bit_count);
+		end
+	endtask
 
 	initial begin
 		$dumpfile("can_tx.vcd");
@@ -31,6 +132,8 @@ module can_tx_tb;
 		start = 1'b0;
 		bit_tick = 1'b0;
 		can_id = 11'b10100110101;
+		dlc = 4'd0;
+		data = 64'd0;
 		errors = 0;
 
 		repeat (2) @(posedge clk);
@@ -85,8 +188,13 @@ module can_tx_tb;
 			errors = errors + 1;
 		end
 
+		check_data_case(4'd0, 64'h0123_4567_89AB_CDEF, 7'd0);
+		check_data_case(4'd1, 64'hD3A5_7C91_E246_80BF, 7'd8);
+		check_data_case(4'd4, 64'hA5C3_96E1_4278_BD0F, 7'd32);
+		check_data_case(4'd9, 64'hFFFF_FFFF_FFFF_FFFF, 7'd0);
+
 		if (errors == 0)
-			$display("PASS: reset, SOF, all 11 ID bits, and CONTROL transition verified.");
+			$display("PASS: reset, SOF, 11-bit ID, DLC 0/1/4 data, MSB-first order, and CRC transition verified.");
 		else
 			$display("FAIL: %0d error(s) detected.", errors);
 

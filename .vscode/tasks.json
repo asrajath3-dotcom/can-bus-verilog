@@ -46,6 +46,39 @@
             "problemMatcher": []
         },
         {
+            "label": "CAN: Compile CAN TX",
+            "type": "shell",
+            "command": "C:\\iverilog\\bin\\iverilog.exe",
+            "args": [
+                "-g2012",
+                "-o",
+                "can_tx_sim.out",
+                "rtl/can_tx.v",
+                "tb/can_tx_tb.v"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "CAN: Run CAN TX Simulation",
+            "type": "shell",
+            "command": "C:\\iverilog\\bin\\vvp.exe",
+            "args": [
+                "can_tx_sim.out"
+            ],
+            "dependsOn": "CAN: Compile CAN TX",
+            "problemMatcher": []
+        },
+        {
+            "label": "CAN: Open CAN TX Waveform",
+            "type": "process",
+            "command": "C:\\msys64\\ucrt64\\bin\\gtkwave.exe",
+            "args": [
+                "${workspaceFolder}\\can_tx.vcd"
+            ],
+            "dependsOn": "CAN: Run CAN TX Simulation",
+            "problemMatcher": []
+        },
+        {
             "label": "CAN: Open Waveform",
             "type": "process",
             "command": "C:\\msys64\\ucrt64\\bin\\gtkwave.exe",
@@ -62,6 +95,14 @@
             "dependsOrder": "sequence",
             "dependsOn": [
                 "CAN: Open Waveform"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "CAN: Simulate TX + Waveform",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "CAN: Open CAN TX Waveform"
             ],
             "problemMatcher": []
         }

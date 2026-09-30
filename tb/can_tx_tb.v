@@ -43,8 +43,10 @@ module can_tx_tb;
 		input [6:0] expected_bit_count;
 		integer bit_index;
 		reg [10:0] expected_id;
+		reg [6:0] expected_control;
 		begin
 			expected_id = 11'b10100110101;
+			expected_control = {3'b000, test_dlc};
 			@(negedge clk);
 			reset = 1'b1;
 			start = 1'b0;
@@ -87,7 +89,20 @@ module can_tx_tb;
 				end
 			end
 
-			pulse_tick();
+			for (bit_index = 0; bit_index < 7; bit_index = bit_index + 1) begin
+				pulse_tick();
+				if (tx !== expected_control[6-bit_index]) begin
+					$display("ERROR: DLC %0d control bit %0d expected %b, observed %b.",
+							 test_dlc, bit_index + 1,
+							 expected_control[6-bit_index], tx);
+					errors = errors + 1;
+				end
+				if (bit_index < 6 && dut.state !== 3'd3) begin
+					$display("ERROR: DLC %0d left CONTROL before seven bit_ticks.", test_dlc);
+					errors = errors + 1;
+				end
+			end
+
 			if (expected_bit_count == 0) begin
 				if (dut.state !== 3'd5) begin
 					$display("ERROR: DLC %0d should skip DATA and enter CRC.", test_dlc);
@@ -183,8 +198,8 @@ module can_tx_tb;
 
 		@(posedge clk);
 		#1;
-		if (tx !== can_id[0]) begin
-			$display("ERROR: tx did not hold the last ID bit in CONTROL.");
+		if (tx !== 1'b0 || dut.state !== 3'd3) begin
+			$display("ERROR: first CONTROL bit was not RTR=0.");
 			errors = errors + 1;
 		end
 
@@ -194,7 +209,7 @@ module can_tx_tb;
 		check_data_case(4'd9, 64'hFFFF_FFFF_FFFF_FFFF, 7'd0);
 
 		if (errors == 0)
-			$display("PASS: reset, SOF, 11-bit ID, DLC 0/1/4 data, MSB-first order, and CRC transition verified.");
+			$display("PASS: reset, SOF, 11-bit ID, 7-bit CONTROL, DLC 0/1/4/9, data MSB-first, and CRC transition verified.");
 		else
 			$display("FAIL: %0d error(s) detected.", errors);
 

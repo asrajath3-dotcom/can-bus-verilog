@@ -6,7 +6,7 @@ module can_tx (
 	input wire [10:0] can_id,
 	input wire [3:0] dlc,
 	input wire [63:0] data,
-	output reg tx
+	output wire tx
 );
 
 	localparam [2:0] IDLE = 3'd0;
@@ -32,15 +32,45 @@ module can_tx (
 	wire crc_enable;
 	wire crc_data_bit;
 	wire [14:0] crc_value;
+	wire stuffer_reset;
+	wire stuffer_bit_tick;
+	wire stuffer_real_bit;
+	wire stuffer_wire_bit;
+	wire stuff_bit;
+	wire real_bit_consumed;
+	wire [2:0] stuffer_run_count;
+	reg crc_delimiter_sent;
 
-	assign crc_reset = reset || ((state == IDLE) && start);
-	assign crc_enable = bit_tick &&
+	assign stuffer_reset = reset || ((state == IDLE) && start);
+	assign stuffer_bit_tick = bit_tick &&
+		((state == SOF) || (state == SEND_ID) || (state == CONTROL) ||
+		 (state == DATA) || (state == CRC));
+	assign stuffer_real_bit = (state == SOF) ? 1'b0 :
+		(state == SEND_ID) ? id_shift[10] :
+		(state == CONTROL) ? control_shift[6] :
+		(state == DATA) ? data_shift[63] :
+		(state == CRC) ? ((crc_bit_count == 4'd0) ? crc_value[14] : crc_shift[14]) : 1'b1;
+	assign tx = ((state == IDLE) ||
+		((state == CRC_DELIMITER) && crc_delimiter_sent)) ? 1'b1 : stuffer_wire_bit;
+
+	assign crc_reset = stuffer_reset;
+	assign crc_enable = real_bit_consumed &&
 		((state == SOF) || (state == SEND_ID) || (state == CONTROL) || (state == DATA));
-	// Use the same pre-edge bit source that the FSM places on tx at this bit_tick.
 	assign crc_data_bit = (state == SOF) ? 1'b0 :
 		(state == SEND_ID) ? id_shift[10] :
 		(state == CONTROL) ? control_shift[6] :
-		(state == DATA) ? data_shift[63] : tx;
+		(state == DATA) ? data_shift[63] : 1'b0;
+
+	can_bit_stuffer bit_stuffer (
+		.clk(clk),
+		.reset(stuffer_reset),
+		.bit_tick(stuffer_bit_tick),
+		.real_bit(stuffer_real_bit),
+		.wire_bit(stuffer_wire_bit),
+		.stuff_bit(stuff_bit),
+		.real_bit_consumed(real_bit_consumed),
+		.run_count(stuffer_run_count)
+	);
 
 	crc15 crc_generator (
 		.clk(clk),
@@ -62,11 +92,10 @@ module can_tx (
 			data_bit_count <= 7'd0;
 			crc_shift <= 15'd0;
 			crc_bit_count <= 4'd0;
-			tx <= 1'b1;
+			crc_delimiter_sent <= 1'b0;
 		end else begin
 			case (state)
 				IDLE: begin
-					tx <= 1'b1;
 					if (start) begin
 						id_shift <= can_id;
 						id_bit_count <= 4'd0;
@@ -77,20 +106,18 @@ module can_tx (
 						data_bit_count <= 7'd0;
 						crc_shift <= 15'd0;
 						crc_bit_count <= 4'd0;
-						tx <= 1'b0;
+						crc_delimiter_sent <= 1'b0;
 						state <= SOF;
 					end
 				end
 
 				SOF: begin
-					tx <= 1'b0;
-					if (bit_tick)
+					if (real_bit_consumed)
 						state <= SEND_ID;
 				end
 
 				SEND_ID: begin
-					if (bit_tick) begin
-						tx <= id_shift[10];
+					if (real_bit_consumed) begin
 						id_shift <= {id_shift[9:0], 1'b0};
 						if (id_bit_count == 4'd10) begin
 							id_bit_count <= 4'd11;
@@ -104,8 +131,7 @@ module can_tx (
 				end
 
 				CONTROL: begin
-					if (bit_tick) begin
-						tx <= control_shift[6];
+					if (real_bit_consumed) begin
 						control_shift <= {control_shift[5:0], 1'b0};
 						if (control_bit_count == 3'd6) begin
 							// DLC values above 8 safely skip payload transmission.
@@ -120,8 +146,7 @@ module can_tx (
 				end
 
 				DATA: begin
-					if (bit_tick) begin
-						tx <= data_shift[63];
+					if (real_bit_consumed) begin
 						data_shift <= {data_shift[62:0], 1'b0};
 						data_bit_count <= data_bit_count + 1'b1;
 						if (data_bit_count == ({dlc_reg, 3'b000} - 7'd1))
@@ -130,26 +155,32 @@ module can_tx (
 				end
 
 				CRC: begin
-					if (bit_tick) begin
+					if (real_bit_consumed) begin
 						if (crc_bit_count == 4'd0) begin
-							// crc_value is final by this later CRC-state tick.
-							tx <= crc_value[14];
 							crc_shift <= {crc_value[13:0], 1'b0};
 							crc_bit_count <= 4'd1;
 						end else begin
-							tx <= crc_shift[14];
 							crc_shift <= {crc_shift[13:0], 1'b0};
-							if (crc_bit_count == 4'd14)
-								state <= CRC_DELIMITER;
-							else
+							if (crc_bit_count == 4'd14) begin
+								crc_delimiter_sent <= 1'b0;
+								if (stuffer_run_count == 3'd5) begin
+									state <= CRC;
+								end else begin
+									state <= CRC_DELIMITER;
+								end
+							end else begin
 								crc_bit_count <= crc_bit_count + 1'b1;
+							end
 						end
+					end else if ((crc_bit_count == 4'd14) && stuff_bit) begin
+						state <= CRC_DELIMITER;
+						crc_delimiter_sent <= 1'b0;
 					end
 				end
 
 				CRC_DELIMITER: begin
 					if (bit_tick)
-						tx <= 1'b1;
+						crc_delimiter_sent <= 1'b1;
 				end
 
 				default: begin
@@ -163,7 +194,7 @@ module can_tx (
 					data_bit_count <= 7'd0;
 					crc_shift <= 15'd0;
 					crc_bit_count <= 4'd0;
-					tx <= 1'b1;
+					crc_delimiter_sent <= 1'b0;
 				end
 			endcase
 		end
